@@ -1,0 +1,51 @@
+name: Auto-Merge Dependabot PRs
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - labeled
+
+jobs:
+  auto_merge:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Merge Dependabot PR
+        id: merge
+        run: |
+          # Check if the PR is a Dependabot PR
+          if [[ "$(jq -r '.pull_request.user.login' $GITHUB_EVENT_PATH)" == "dependabot[bot]" ]]; then
+            # Check if the PR is labeled with "automerge"
+            labels=$(jq -r '.pull_request.labels[].name' $GITHUB_EVENT_PATH)
+            if [[ "$labels" == *"automerge"* ]]; then
+              # Get the pull request number
+              pr_number=$(jq -r '.pull_request.number' $GITHUB_EVENT_PATH)
+
+              # Create a merge pull request request using GitHub REST API
+              response=$(curl -X PUT -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                -d '{"merge_method":"merge"}' \
+                "https://api.github.com/repos/${{ github.repository }}/pulls/$pr_number/merge")
+
+              # Check if the merge was successful
+              merged=$(echo $response | jq -r '.merged')
+              if [ "$merged" == "true" ]; then
+                echo "Pull request $pr_number has been successfully merged."
+              else
+                echo "Failed to merge pull request $pr_number."
+                exit 1
+              fi
+            fi
+          fi
+
+      - name: Set PR status
+        if: steps.merge.outcome == 'success'
+        run: |
+          echo "::set-output name=status::merged"
+        else
+          echo "::set-output name=status::not_merged"
